@@ -147,6 +147,14 @@ sup {
   text-transform: uppercase;
 }
 
+.ordinal-suffix {
+  display: inline-block;
+  margin-left: 0.03em;
+  font-size: 0.38em;
+  line-height: 0;
+  transform: translateY(-0.62em);
+}
+
 .carnaval {
   margin: 0;
   color: var(--teal);
