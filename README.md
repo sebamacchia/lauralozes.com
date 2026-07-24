@@ -18,6 +18,8 @@ and the U.S.
 - `index.html` - page content, metadata, social tags, and section structure.
 - `styles.css` - visual design and responsive layout.
 - `script.js` - live local-time footer behavior.
+- `cumple/index.html` and `cumple/styles.css` - RSVP route for the birthday
+  reminder at `/cumple/`.
 - `assets/laura-headshot.jpg` - optimized professional headshot.
 - `robots.txt` and `sitemap.xml` - basic search-engine files for
   `lauralozes.com`.
