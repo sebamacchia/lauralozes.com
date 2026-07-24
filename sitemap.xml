@@ -4,4 +4,8 @@
     <loc>https://lauralozes.com/</loc>
     <priority>1.0</priority>
   </url>
+  <url>
+    <loc>https://lauralozes.com/cumple/</loc>
+    <priority>0.7</priority>
+  </url>
 </urlset>
