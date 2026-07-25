@@ -234,6 +234,78 @@ sup {
   transform: rotate(180deg);
 }
 
+.memory-gallery {
+  border-bottom: var(--border);
+  padding: clamp(28px, 4vw, 68px) clamp(18px, 3.4vw, 58px)
+    calc(var(--footer-h) + clamp(30px, 4vw, 70px));
+}
+
+.gallery-header {
+  display: grid;
+  grid-template-columns: minmax(170px, 18vw) 1fr minmax(170px, 22vw);
+  gap: clamp(18px, 3vw, 44px);
+  align-items: end;
+  border-bottom: var(--border);
+  padding-bottom: clamp(22px, 2.4vw, 38px);
+}
+
+.gallery-header h2 {
+  margin: 0;
+  color: var(--burgundy);
+  font-family: "Bungee", "Archivo Black", Impact, sans-serif;
+  font-size: clamp(40px, 5vw, 94px);
+  letter-spacing: -0.06em;
+  line-height: 0.84;
+  text-transform: uppercase;
+}
+
+.gallery-header p:last-child {
+  margin: 0;
+  color: var(--teal);
+  font-size: clamp(16px, 1.1vw, 22px);
+  font-weight: 900;
+  line-height: 1.08;
+  text-transform: uppercase;
+}
+
+.photo-grid {
+  column-count: 4;
+  column-gap: clamp(12px, 1.3vw, 22px);
+  padding-top: clamp(18px, 2.4vw, 38px);
+}
+
+.photo-card {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+  margin: 0 0 clamp(12px, 1.3vw, 22px);
+  break-inside: avoid;
+  border: var(--border);
+  background: var(--black);
+}
+
+.photo-card::before {
+  content: "ARCHIVO LAU";
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 1;
+  background: var(--pink);
+  border: var(--border);
+  color: var(--teal);
+  padding: 4px 7px;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.photo-card img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .event-footer {
   position: fixed;
   right: 0;
@@ -288,6 +360,18 @@ sup {
     padding-bottom: 64px;
   }
 
+  .memory-gallery {
+    padding-bottom: 64px;
+  }
+
+  .gallery-header {
+    grid-template-columns: 1fr;
+  }
+
+  .photo-grid {
+    column-count: 2;
+  }
+
   .rsvp-module {
     min-height: 420px;
   }
@@ -331,6 +415,14 @@ sup {
 
   .vertical-meta {
     display: none;
+  }
+
+  .memory-gallery {
+    padding: 26px 20px 36px;
+  }
+
+  .photo-grid {
+    column-count: 1;
   }
 
   .event-footer {
