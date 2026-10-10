@@ -343,8 +343,7 @@
   const photoUrl = (item) => 'api.php?a=photo&f=' + item.photo;
 
   async function load() {
-    items = (await api('list')).items;
-    items.sort((a, b) => b.created - a.created);
+    items = (await api('list')).items.reverse(); // the server keeps them oldest first
     render();
   }
 
@@ -396,13 +395,14 @@
     }
   }
 
-  function uniquePlaces() {
+  // Values already used for a field, newest first, then any starter suggestions not yet used.
+  function suggestions(field, starters = []) {
     const seen = new Map();
-    for (const it of items) {
-      const key = it.place.toLowerCase();
-      if (!seen.has(key)) seen.set(key, it.place);
+    for (const value of [...items.map((it) => it[field]), ...starters]) {
+      const key = value.toLowerCase();
+      if (!seen.has(key)) seen.set(key, value);
     }
-    return [...seen.values()].slice(0, 12);
+    return [...seen.values()].slice(0, 16);
   }
 
   function openSheet(entry) {
@@ -410,8 +410,8 @@
     preview.src = entry.blob ? URL.createObjectURL(entry.blob) : photoUrl(entry);
     typeInput.value = entry.type || '';
     placeInput.value = entry.place || '';
-    chips($('typeChips'), TYPES, typeInput);
-    chips($('placeChips'), uniquePlaces(), placeInput);
+    chips($('typeChips'), suggestions('type', TYPES), typeInput);
+    chips($('placeChips'), suggestions('place'), placeInput);
     $('del').hidden = entry.id == null;
     $('sheetTitle').textContent = entry.id == null ? 'Nueva prenda' : 'Editar prenda';
     say($('formError'), '');
