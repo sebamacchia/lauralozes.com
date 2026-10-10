@@ -210,6 +210,7 @@
   .row input { flex: 1; min-width: 0; }
   .stack { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
   .strip .second { margin-top: 16px; }
+  .uses:empty + .second { margin-top: 0; }
 
   /* ── Garment detail: the place is the answer, so it is the poster ── */
   .poster {
@@ -221,7 +222,18 @@
   }
   .full { display: block; width: 100%; border-bottom: var(--rule) solid var(--black); }
   .strip .full { border: 2px solid var(--black); }
-  .fact { font-size: 24px; font-weight: 800; font-stretch: 62%; line-height: 1; }
+  .fact { font-size: 24px; font-weight: 800; font-stretch: 62%; line-height: 1; overflow-wrap: anywhere; }
+  .facts { display: flex; gap: 28px; }
+  .uses { list-style: none; margin: 0; padding: 0; }
+  .uses li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 0;
+    border-top: 1.5px solid var(--black);
+  }
+  .uses .fact + p { margin-top: 4px; }
   .gate h2 { margin-bottom: 10px; }
   .gate #repeatWrap, .gate .error { margin-top: 16px; }
   button:disabled { border-color: var(--grey); color: var(--grey); cursor: default; }
@@ -256,7 +268,7 @@
   </header>
 
   <div id="searchStrip" class="strip" hidden>
-    <input id="search" type="search" placeholder="Buscar prenda o lugar" aria-label="Buscar prenda o lugar" autocomplete="off" enterkeyhint="search">
+    <input id="search" type="search" placeholder="Buscar prenda, color o lugar" aria-label="Buscar prenda, color o lugar" autocomplete="off" enterkeyhint="search">
   </div>
   <div id="grid" class="grid"></div>
   <div id="empty" class="strip empty" hidden>
@@ -292,6 +304,18 @@
     </div>
 
     <div class="strip">
+      <label for="color">Color <span class="quiet">Opcional</span></label>
+      <div id="colorChips" class="chips"></div>
+      <input id="color" type="text" placeholder="Rosa, azul marino" maxlength="30" autocapitalize="sentences" enterkeyhint="next">
+    </div>
+
+    <div class="strip">
+      <label for="fabric">Tipo de tela <span class="quiet">Opcional</span></label>
+      <div id="fabricChips" class="chips"></div>
+      <input id="fabric" type="text" placeholder="Lino, algodón" maxlength="30" autocapitalize="sentences" enterkeyhint="next">
+    </div>
+
+    <div class="strip">
       <p class="label">Foto del lugar <span class="quiet">Opcional</span></p>
       <div class="row">
         <img id="placePreview" class="thumb" alt="Foto del lugar" hidden>
@@ -303,13 +327,16 @@
     </div>
 
     <div class="strip">
-      <label for="wornDate">Cuándo lo usé <span class="quiet">Opcional</span></label>
+      <p class="label">Cuándo lo usé <span class="quiet">Opcional</span></p>
+      <ul id="wornList" class="uses"></ul>
+      <label for="wornDate" class="second">Fecha</label>
       <div class="row">
         <input id="wornDate" type="date">
         <button id="wornToday" type="button">Hoy</button>
       </div>
-      <label for="wornPlace" class="second">Dónde lo usé <span class="quiet">Opcional</span></label>
+      <label for="wornPlace" class="second">Dónde lo usé</label>
       <input id="wornPlace" type="text" placeholder="Boda, oficina, viaje" maxlength="60" autocapitalize="sentences" enterkeyhint="done">
+      <button id="wornAdd" class="second" type="button">Añadir otro uso</button>
     </div>
 
     <p id="formError" class="strip error" role="alert" hidden></p>
@@ -329,14 +356,23 @@
       <h2 id="detailPlace" class="poster"></h2>
     </div>
     <img id="detailPhoto" class="full" alt="">
+    <div id="detailFacts" class="strip facts" hidden>
+      <div id="detailColorBox">
+        <p class="label">Color</p>
+        <p id="detailColor" class="fact"></p>
+      </div>
+      <div id="detailFabricBox">
+        <p class="label">Tipo de tela</p>
+        <p id="detailFabric" class="fact"></p>
+      </div>
+    </div>
     <div id="detailPlaceStrip" class="strip" hidden>
       <p class="label">Foto del lugar</p>
       <img id="detailPlacePhoto" class="full" alt="Foto del lugar">
     </div>
     <div id="detailWornStrip" class="strip" hidden>
       <p class="label">Cuándo lo usé</p>
-      <p id="detailWornDate" class="fact"></p>
-      <p id="detailWornPlace"></p>
+      <ul id="detailWorn" class="uses"></ul>
     </div>
     <div class="actions">
       <button id="detailClose" type="button">Cerrar</button>
@@ -373,12 +409,15 @@
 <script>
 (() => {
   const TYPES = ['Camiseta', 'Camisa', 'Jersey', 'Pantalón', 'Falda', 'Vestido', 'Chaqueta', 'Abrigo', 'Zapatos', 'Accesorio'];
+  const COLORS = ['Blanco', 'Negro', 'Gris', 'Azul', 'Rojo', 'Verde', 'Amarillo', 'Rosa', 'Naranja', 'Morado', 'Marrón', 'Beige'];
+  const FABRICS = ['Algodón', 'Lino', 'Lana', 'Seda', 'Vaquero', 'Poliéster', 'Punto', 'Cuero'];
   const MAX_SIDE = 1000;
 
   const $ = (id) => document.getElementById(id);
   const grid = $('grid'), empty = $('empty'), search = $('search');
   const sheet = $('sheet'), detail = $('detail'), gate = $('gate');
   const typeInput = $('type'), placeInput = $('place'), preview = $('preview');
+  const colorInput = $('color'), fabricInput = $('fabric');
 
   let items = [];
   let editing = null; // a saved garment being edited, or { blob } for a new one; placeBlob / removePlacePhoto track the place photo
@@ -421,6 +460,9 @@
     document.body.classList.toggle('locked', Boolean(layer));
     if (layer) layer.scrollTop = 0;
   }
+
+  // Lower case without accents, so "marron" finds "Marrón".
+  const plain = (text) => text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
   function today() {
     const now = new Date();
@@ -472,7 +514,10 @@
       b.type = 'button';
       b.className = 'chip';
       b.textContent = value;
-      b.onclick = () => { input.value = value; mark(container, input); };
+      b.onclick = () => {
+        input.value = b.getAttribute('aria-pressed') === 'true' ? '' : value; // tapping the selected one clears it
+        mark(container, input);
+      };
       return b;
     }));
     mark(container, input);
@@ -489,6 +534,7 @@
   function suggestions(field, starters = []) {
     const seen = new Map();
     for (const value of [...items.map((it) => it[field]), ...starters]) {
+      if (!value) continue;
       const key = value.toLowerCase();
       if (!seen.has(key)) seen.set(key, value);
     }
@@ -502,6 +548,46 @@
     $('placeShot').textContent = source ? 'Cambiar foto' : 'Hacer foto del lugar';
   }
 
+  // One line of the "when I wore it" list; with onRemove it gets a remove button.
+  function useRow(use, onRemove) {
+    const row = document.createElement('li');
+    const text = document.createElement('div');
+    const main = document.createElement('p');
+    main.className = 'fact';
+    main.textContent = use.date ? longDate(use.date) : use.place;
+    text.append(main);
+    if (use.date && use.place) {
+      const where = document.createElement('p');
+      where.textContent = use.place;
+      text.append(where);
+    }
+    row.append(text);
+    if (onRemove) {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = 'Quitar';
+      remove.onclick = onRemove;
+      row.append(remove);
+    }
+    return row;
+  }
+
+  function pendingUse() {
+    const date = $('wornDate').value, place = $('wornPlace').value.trim();
+    return date || place ? { date, place } : null;
+  }
+
+  function newestFirst(uses) {
+    return uses.sort((a, b) => b.date.localeCompare(a.date));
+  }
+
+  function showUses() {
+    $('wornList').replaceChildren(...editing.worn.map((use) => useRow(use, () => {
+      editing.worn.splice(editing.worn.indexOf(use), 1);
+      showUses();
+    })));
+  }
+
   function openDetail(item) {
     viewing = item;
     $('detailType').textContent = item.type;
@@ -510,9 +596,13 @@
     $('detailPhoto').alt = item.type;
     $('detailPlaceStrip').hidden = !item.placePhoto;
     setImage($('detailPlacePhoto'), item.placePhoto);
-    $('detailWornStrip').hidden = !item.wornDate && !item.wornPlace;
-    $('detailWornDate').textContent = item.wornDate ? longDate(item.wornDate) : '';
-    $('detailWornPlace').textContent = item.wornPlace || '';
+    $('detailFacts').hidden = !item.color && !item.fabric;
+    $('detailColorBox').hidden = !item.color;
+    $('detailFabricBox').hidden = !item.fabric;
+    $('detailColor').textContent = item.color;
+    $('detailFabric').textContent = item.fabric;
+    $('detailWornStrip').hidden = item.worn.length === 0;
+    $('detailWorn').replaceChildren(...item.worn.map((use) => useRow(use)));
     show(detail);
   }
 
@@ -521,8 +611,13 @@
     setImage(preview, entry.blob || entry.photo);
     typeInput.value = entry.type || '';
     placeInput.value = entry.place || '';
-    $('wornDate').value = entry.wornDate || '';
-    $('wornPlace').value = entry.wornPlace || '';
+    colorInput.value = entry.color || '';
+    fabricInput.value = entry.fabric || '';
+    chips($('colorChips'), suggestions('color', COLORS), colorInput);
+    chips($('fabricChips'), suggestions('fabric', FABRICS), fabricInput);
+    entry.worn = (entry.worn || []).map((use) => ({ ...use }));
+    $('wornDate').value = $('wornPlace').value = '';
+    showUses();
     showPlacePhoto();
     chips($('typeChips'), suggestions('type', TYPES), typeInput);
     chips($('placeChips'), suggestions('place'), placeInput);
@@ -583,9 +678,9 @@
   }
 
   function render() {
-    const q = search.value.trim().toLowerCase();
+    const q = plain(search.value.trim());
     const shown = q
-      ? items.filter((it) => (it.type + ' ' + it.place).toLowerCase().includes(q))
+      ? items.filter((it) => plain([it.type, it.place, it.color, it.fabric, ...it.worn.map((use) => use.place)].join(' ')).includes(q))
       : items;
 
     grid.replaceChildren(...shown.map((it) => {
@@ -598,7 +693,7 @@
       img.loading = 'lazy';
       const info = document.createElement('div');
       const type = document.createElement('span');
-      type.textContent = it.type;
+      type.textContent = [it.type, it.color].filter(Boolean).join(', ');
       const place = document.createElement('b');
       place.textContent = it.place;
       info.append(type, place);
@@ -635,6 +730,14 @@
     if (e.key === 'Enter') { e.preventDefault(); placeInput.focus(); }
   };
   placeInput.oninput = () => mark($('placeChips'), placeInput);
+  colorInput.onkeydown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); fabricInput.focus(); }
+  };
+  fabricInput.onkeydown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); fabricInput.blur(); }
+  };
+  colorInput.oninput = () => mark($('colorChips'), colorInput);
+  fabricInput.oninput = () => mark($('fabricChips'), fabricInput);
   search.oninput = render;
   $('cancel').onclick = closeSheet;
   $('detailClose').onclick = () => show(null);
@@ -659,6 +762,14 @@
     showPlacePhoto();
   };
   $('wornToday').onclick = () => { $('wornDate').value = today(); };
+  $('wornAdd').onclick = () => {
+    const use = pendingUse();
+    if (!use) return $('wornDate').focus();
+    editing.worn.push(use);
+    newestFirst(editing.worn);
+    $('wornDate').value = $('wornPlace').value = '';
+    showUses();
+  };
 
   $('form').onsubmit = async (e) => {
     e.preventDefault();
@@ -668,8 +779,10 @@
     const body = new FormData();
     body.set('type', type);
     body.set('place', place);
-    body.set('wornDate', $('wornDate').value);
-    body.set('wornPlace', $('wornPlace').value.trim());
+    body.set('color', colorInput.value.trim());
+    body.set('fabric', fabricInput.value.trim());
+    // A use typed in but not yet added to the list is saved too.
+    body.set('worn', JSON.stringify(editing.worn.concat(pendingUse() || [])));
     if (editing.id != null) body.set('id', editing.id);
     else body.set('photo', editing.blob, 'photo.jpg');
     if (editing.placeBlob) body.set('placePhoto', editing.placeBlob, 'place.jpg');

@@ -6,6 +6,7 @@
 const MAX_ITEMS = 2000;
 const MAX_PHOTO_BYTES = 1048576;
 const MAX_PHOTO_SIDE = 2000;
+const MAX_USES = 200;
 const MIN_PASSWORD = 8;
 const MAX_FAILS = 5;
 const LOCK_SECONDS = 900;
@@ -219,6 +220,42 @@ function clean_date(string $value): string
     return $value;
 }
 
+// The "when I wore it" list arrives as JSON: [{date, place}, ...]. Empty entries are dropped.
+function clean_uses(string $json): array
+{
+    $list = $json === '' ? [] : json_decode($json, true);
+    if (!is_array($list) || count($list) > MAX_USES) {
+        fail(400, 'La lista de usos no es válida.');
+    }
+    $uses = [];
+    foreach ($list as $use) {
+        if (!is_array($use)) {
+            fail(400, 'La lista de usos no es válida.');
+        }
+        $date = clean_date((string) ($use['date'] ?? ''));
+        $place = clean_text((string) ($use['place'] ?? ''), 60);
+        if ($date !== '' || $place !== '') {
+            $uses[] = ['date' => $date, 'place' => $place];
+        }
+    }
+    usort($uses, function ($a, $b) {
+        return strcmp($b['date'], $a['date']);
+    });
+    return $uses;
+}
+
+// Garments saved by earlier versions lack the newer fields, or hold a single use.
+function with_all_fields(array $item): array
+{
+    if (!isset($item['worn'])) {
+        $date = $item['wornDate'] ?? '';
+        $place = $item['wornPlace'] ?? '';
+        $item['worn'] = ($date !== '' || $place !== '') ? [['date' => $date, 'place' => $place]] : [];
+    }
+    unset($item['wornDate'], $item['wornPlace']);
+    return $item + ['color' => '', 'fabric' => '', 'placePhoto' => ''];
+}
+
 function was_uploaded(string $field): bool
 {
     return isset($_FILES[$field]) && ($_FILES[$field]['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
@@ -270,8 +307,9 @@ function save_item(): array
     $fields = [
         'type' => clean_text((string) ($_POST['type'] ?? ''), 40),
         'place' => clean_text((string) ($_POST['place'] ?? ''), 60),
-        'wornDate' => clean_date((string) ($_POST['wornDate'] ?? '')),
-        'wornPlace' => clean_text((string) ($_POST['wornPlace'] ?? ''), 60),
+        'color' => clean_text((string) ($_POST['color'] ?? ''), 30),
+        'fabric' => clean_text((string) ($_POST['fabric'] ?? ''), 30),
+        'worn' => clean_uses((string) ($_POST['worn'] ?? '')),
     ];
     if ($fields['type'] === '' || $fields['place'] === '') {
         fail(400, 'Falta el tipo de prenda o el lugar.');
@@ -322,7 +360,7 @@ function save_item(): array
     $item = store_update('items', function (array &$items) use ($id, $fields, $replacePlacePhoto, $placePhoto, &$oldPlacePhoto) {
         foreach ($items as &$item) {
             if ($item['id'] === $id) {
-                $item = array_merge($item, $fields);
+                $item = array_merge(with_all_fields($item), $fields);
                 if ($replacePlacePhoto) {
                     $oldPlacePhoto = $item['placePhoto'] ?? '';
                     $item['placePhoto'] = $placePhoto ?? '';
@@ -414,7 +452,7 @@ switch ($action) {
         ok();
 
     case 'list':
-        ok(['items' => store_read('items')]);
+        ok(['items' => array_map('with_all_fields', store_read('items'))]);
 
     case 'save':
         ok(['item' => save_item()]);
