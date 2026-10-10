@@ -112,6 +112,7 @@
   }
   input[type='search'],
   input[type='text'],
+  input[type='date'],
   input[type='password'] {
     display: block;
     width: 100%;
@@ -130,7 +131,8 @@
     outline-offset: 2px;
     box-shadow: 0 0 0 2px var(--black);
   }
-  label { display: block; margin-bottom: 10px; font-weight: 600; }
+  label, .label { display: block; margin-bottom: 10px; font-weight: 600; }
+  label .quiet, .label .quiet { margin-left: 6px; font-weight: 400; }
 
   /* ── Garments: a ruled sheet, one cell per garment ── */
   /* every cell draws its right rule; the last column's is pushed off the edge and clipped */
@@ -194,15 +196,32 @@
     background: var(--white);
     padding-top: env(safe-area-inset-top);
   }
-  .sheet form { flex: 1 0 auto; display: flex; flex-direction: column; }
+  .sheet > form, .sheet-body { flex: 1 0 auto; display: flex; flex-direction: column; }
   .sheet-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
-  .sheet img {
+  .thumb {
     display: block;
+    flex: none;
     width: 132px;
     height: 132px;
     object-fit: cover;
     border: 2px solid var(--black);
   }
+  .row { display: flex; align-items: flex-end; gap: 8px; }
+  .row input { flex: 1; min-width: 0; }
+  .stack { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+  .strip .second { margin-top: 16px; }
+
+  /* ── Garment detail: the place is the answer, so it is the poster ── */
+  .poster {
+    margin-top: 8px;
+    font-size: clamp(44px, 15vw, 76px);
+    line-height: 0.86;
+    letter-spacing: -0.02em;
+    overflow-wrap: anywhere;
+  }
+  .full { display: block; width: 100%; border-bottom: var(--rule) solid var(--black); }
+  .strip .full { border: 2px solid var(--black); }
+  .fact { font-size: 24px; font-weight: 800; font-stretch: 62%; line-height: 1; }
   .gate h2 { margin-bottom: 10px; }
   .gate #repeatWrap, .gate .error { margin-top: 16px; }
   button:disabled { border-color: var(--grey); color: var(--grey); cursor: default; }
@@ -251,12 +270,13 @@
 
 <button id="add" class="add primary" type="button" hidden>Añadir prenda</button>
 <input id="camera" type="file" accept="image/*" capture="environment" hidden>
+<input id="placeCamera" type="file" accept="image/*" capture="environment" hidden>
 
 <section id="sheet" class="sheet" hidden>
   <form id="form" autocomplete="off">
     <div class="strip sheet-head">
       <h2 id="sheetTitle"></h2>
-      <img id="preview" alt="Foto de la prenda">
+      <img id="preview" class="thumb" alt="Foto de la prenda">
     </div>
 
     <div class="strip">
@@ -271,6 +291,27 @@
       <input id="place" type="text" placeholder="Armario, cajón 2, maleta" maxlength="60" autocapitalize="sentences" enterkeyhint="done" required>
     </div>
 
+    <div class="strip">
+      <p class="label">Foto del lugar <span class="quiet">Opcional</span></p>
+      <div class="row">
+        <img id="placePreview" class="thumb" alt="Foto del lugar" hidden>
+        <div class="stack">
+          <button id="placeShot" type="button">Hacer foto del lugar</button>
+          <button id="placeRemove" type="button" hidden>Quitar foto</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="strip">
+      <label for="wornDate">Cuándo lo usé <span class="quiet">Opcional</span></label>
+      <div class="row">
+        <input id="wornDate" type="date">
+        <button id="wornToday" type="button">Hoy</button>
+      </div>
+      <label for="wornPlace" class="second">Dónde lo usé <span class="quiet">Opcional</span></label>
+      <input id="wornPlace" type="text" placeholder="Boda, oficina, viaje" maxlength="60" autocapitalize="sentences" enterkeyhint="done">
+    </div>
+
     <p id="formError" class="strip error" role="alert" hidden></p>
 
     <div class="actions">
@@ -279,6 +320,29 @@
       <button id="save" class="primary" type="submit">Guardar</button>
     </div>
   </form>
+</section>
+
+<section id="detail" class="sheet" hidden>
+  <div class="sheet-body">
+    <div class="strip">
+      <p id="detailType" class="label"></p>
+      <h2 id="detailPlace" class="poster"></h2>
+    </div>
+    <img id="detailPhoto" class="full" alt="">
+    <div id="detailPlaceStrip" class="strip" hidden>
+      <p class="label">Foto del lugar</p>
+      <img id="detailPlacePhoto" class="full" alt="Foto del lugar">
+    </div>
+    <div id="detailWornStrip" class="strip" hidden>
+      <p class="label">Cuándo lo usé</p>
+      <p id="detailWornDate" class="fact"></p>
+      <p id="detailWornPlace"></p>
+    </div>
+    <div class="actions">
+      <button id="detailClose" type="button">Cerrar</button>
+      <button id="detailEdit" class="primary" type="button">Editar</button>
+    </div>
+  </div>
 </section>
 
 <section id="gate" class="sheet gate" hidden>
@@ -312,11 +376,13 @@
   const MAX_SIDE = 1000;
 
   const $ = (id) => document.getElementById(id);
-  const grid = $('grid'), empty = $('empty'), search = $('search'), sheet = $('sheet'), gate = $('gate');
+  const grid = $('grid'), empty = $('empty'), search = $('search');
+  const sheet = $('sheet'), detail = $('detail'), gate = $('gate');
   const typeInput = $('type'), placeInput = $('place'), preview = $('preview');
 
   let items = [];
-  let editing = null; // { id?, type?, place?, blob? }
+  let editing = null; // a saved garment being edited, or { blob } for a new one; placeBlob / removePlacePhoto track the place photo
+  let viewing = null;
   let gateMode = 'login';
 
   // --- server (photos and list live on the hosting, nothing is kept on the phone) ---
@@ -340,7 +406,31 @@
     return data;
   }
 
-  const photoUrl = (item) => 'api.php?a=photo&f=' + item.photo;
+  const photoUrl = (name) => 'api.php?a=photo&f=' + name;
+
+  // Show a freshly taken photo (Blob), a saved one (name), or nothing.
+  function setImage(img, source) {
+    if (img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
+    if (!source) img.removeAttribute('src');
+    else img.src = source instanceof Blob ? URL.createObjectURL(source) : photoUrl(source);
+  }
+
+  // Only one full-screen layer is open at a time; the page behind must not scroll.
+  function show(layer) {
+    for (const each of [sheet, detail, gate]) each.hidden = each !== layer;
+    document.body.classList.toggle('locked', Boolean(layer));
+    if (layer) layer.scrollTop = 0;
+  }
+
+  function today() {
+    const now = new Date();
+    return [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
+  }
+
+  function longDate(iso) {
+    const [year, month, day] = iso.split('-').map(Number);
+    return new Date(year, month - 1, day).toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' });
+  }
 
   async function load() {
     items = (await api('list')).items.reverse(); // the server keeps them oldest first
@@ -405,27 +495,48 @@
     return [...seen.values()].slice(0, 16);
   }
 
+  function showPlacePhoto() {
+    const source = editing.placeBlob || (!editing.removePlacePhoto && editing.placePhoto) || null;
+    setImage($('placePreview'), source);
+    $('placePreview').hidden = $('placeRemove').hidden = !source;
+    $('placeShot').textContent = source ? 'Cambiar foto' : 'Hacer foto del lugar';
+  }
+
+  function openDetail(item) {
+    viewing = item;
+    $('detailType').textContent = item.type;
+    $('detailPlace').textContent = item.place;
+    setImage($('detailPhoto'), item.photo);
+    $('detailPhoto').alt = item.type;
+    $('detailPlaceStrip').hidden = !item.placePhoto;
+    setImage($('detailPlacePhoto'), item.placePhoto);
+    $('detailWornStrip').hidden = !item.wornDate && !item.wornPlace;
+    $('detailWornDate').textContent = item.wornDate ? longDate(item.wornDate) : '';
+    $('detailWornPlace').textContent = item.wornPlace || '';
+    show(detail);
+  }
+
   function openSheet(entry) {
     editing = entry;
-    preview.src = entry.blob ? URL.createObjectURL(entry.blob) : photoUrl(entry);
+    setImage(preview, entry.blob || entry.photo);
     typeInput.value = entry.type || '';
     placeInput.value = entry.place || '';
+    $('wornDate').value = entry.wornDate || '';
+    $('wornPlace').value = entry.wornPlace || '';
+    showPlacePhoto();
     chips($('typeChips'), suggestions('type', TYPES), typeInput);
     chips($('placeChips'), suggestions('place'), placeInput);
     $('del').hidden = entry.id == null;
     $('sheetTitle').textContent = entry.id == null ? 'Nueva prenda' : 'Editar prenda';
     say($('formError'), '');
     busy(false);
-    sheet.hidden = false;
-    document.body.classList.add('locked');
-    sheet.scrollTop = 0;
+    show(sheet);
   }
 
   function closeSheet() {
-    sheet.hidden = true;
-    document.body.classList.remove('locked');
-    if (preview.src.startsWith('blob:')) URL.revokeObjectURL(preview.src);
-    preview.removeAttribute('src');
+    show(null);
+    setImage(preview, null);
+    setImage($('placePreview'), null);
     editing = null;
   }
 
@@ -449,13 +560,11 @@
     say($('gateError'), '');
     if (!sheet.hidden) closeSheet();
     $('add').hidden = true;
-    gate.hidden = false;
-    document.body.classList.add('locked');
+    show(gate);
   }
 
   async function enter() {
-    gate.hidden = true;
-    document.body.classList.remove('locked');
+    show(null);
     $('add').hidden = false;
     $('logoutStrip').hidden = false;
     try {
@@ -484,7 +593,7 @@
       card.type = 'button';
       card.className = 'item';
       const img = document.createElement('img');
-      img.src = photoUrl(it);
+      img.src = photoUrl(it.photo);
       img.alt = it.type;
       img.loading = 'lazy';
       const info = document.createElement('div');
@@ -494,7 +603,7 @@
       place.textContent = it.place;
       info.append(type, place);
       card.append(img, info);
-      card.onclick = () => openSheet({ ...it });
+      card.onclick = () => openDetail(it);
       return card;
     }));
 
@@ -528,6 +637,28 @@
   placeInput.oninput = () => mark($('placeChips'), placeInput);
   search.oninput = render;
   $('cancel').onclick = closeSheet;
+  $('detailClose').onclick = () => show(null);
+  $('detailEdit').onclick = () => openSheet({ ...viewing });
+
+  $('placeShot').onclick = () => $('placeCamera').click();
+  $('placeCamera').onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file || !editing) return;
+    try {
+      editing.placeBlob = await shrink(file);
+      showPlacePhoto();
+      say($('formError'), '');
+    } catch (err) {
+      say($('formError'), err.message);
+    }
+  };
+  $('placeRemove').onclick = () => {
+    editing.placeBlob = null;
+    editing.removePlacePhoto = true;
+    showPlacePhoto();
+  };
+  $('wornToday').onclick = () => { $('wornDate').value = today(); };
 
   $('form').onsubmit = async (e) => {
     e.preventDefault();
@@ -537,8 +668,12 @@
     const body = new FormData();
     body.set('type', type);
     body.set('place', place);
+    body.set('wornDate', $('wornDate').value);
+    body.set('wornPlace', $('wornPlace').value.trim());
     if (editing.id != null) body.set('id', editing.id);
     else body.set('photo', editing.blob, 'photo.jpg');
+    if (editing.placeBlob) body.set('placePhoto', editing.placeBlob, 'place.jpg');
+    else if (editing.removePlacePhoto) body.set('removePlacePhoto', '1');
     busy(true);
     try {
       await api('save', body);

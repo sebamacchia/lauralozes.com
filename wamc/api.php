@@ -208,10 +208,26 @@ function clean_text(string $value, int $max): string
     return mb_substr($value, 0, $max);
 }
 
-// Accept only a real JPEG within the size limits; re-encode it when GD is available
-// so that nothing but pixels reaches the disk.
-function store_photo(array $upload): string
+function clean_date(string $value): string
 {
+    if ($value === '') {
+        return '';
+    }
+    if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $value, $m) || !checkdate((int) $m[2], (int) $m[3], (int) $m[1])) {
+        fail(400, 'La fecha no es válida.');
+    }
+    return $value;
+}
+
+function was_uploaded(string $field): bool
+{
+    return isset($_FILES[$field]) && ($_FILES[$field]['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
+}
+
+// Accept only a real JPEG within the size limits.
+function check_photo(string $field): void
+{
+    $upload = $_FILES[$field] ?? [];
     if (($upload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || !is_uploaded_file($upload['tmp_name'])) {
         fail(400, 'La foto no ha llegado. Vuelve a intentarlo.');
     }
@@ -222,91 +238,120 @@ function store_photo(array $upload): string
     if (!$info || $info[2] !== IMAGETYPE_JPEG || $info[0] > MAX_PHOTO_SIDE || $info[1] > MAX_PHOTO_SIDE) {
         fail(400, 'El archivo no es una foto válida.');
     }
+}
+
+// Save a checked photo under a random name. It is re-encoded when GD is available
+// so that nothing but pixels reaches the disk. Returns null if it cannot be saved.
+function store_photo(string $field): ?string
+{
+    $tmp = $_FILES[$field]['tmp_name'];
     $name = bin2hex(random_bytes(16));
-    $saved = false;
     if (function_exists('imagecreatefromjpeg')) {
-        $image = @imagecreatefromjpeg($upload['tmp_name']);
-        if (!$image) {
-            fail(400, 'El archivo no es una foto válida.');
-        }
-        $saved = imagejpeg($image, photo_path($name), 82);
+        $image = @imagecreatefromjpeg($tmp);
+        $saved = $image && imagejpeg($image, photo_path($name), 82);
     } else {
-        $saved = move_uploaded_file($upload['tmp_name'], photo_path($name));
+        $saved = move_uploaded_file($tmp, photo_path($name));
     }
-    if (!$saved) {
-        fail(500, 'El servidor no ha podido guardar la foto.');
+    return $saved ? $name : null;
+}
+
+function drop_photos(?string ...$names): void
+{
+    foreach ($names as $name) {
+        if ($name) {
+            @unlink(photo_path($name));
+        }
     }
-    return $name;
 }
 
 function save_item(): array
 {
-    $type = clean_text((string) ($_POST['type'] ?? ''), 40);
-    $place = clean_text((string) ($_POST['place'] ?? ''), 60);
     $id = (string) ($_POST['id'] ?? '');
-    if ($type === '' || $place === '') {
+    $fields = [
+        'type' => clean_text((string) ($_POST['type'] ?? ''), 40),
+        'place' => clean_text((string) ($_POST['place'] ?? ''), 60),
+        'wornDate' => clean_date((string) ($_POST['wornDate'] ?? '')),
+        'wornPlace' => clean_text((string) ($_POST['wornPlace'] ?? ''), 60),
+    ];
+    if ($fields['type'] === '' || $fields['place'] === '') {
         fail(400, 'Falta el tipo de prenda o el lugar.');
     }
     if ($id !== '' && !preg_match('/^[a-f0-9]{16}$/', $id)) {
         fail(400, 'Prenda desconocida.');
     }
+    $isNew = $id === '';
+    $full = 'El armario está lleno. Borra alguna prenda para añadir otra.';
+    if ($isNew && count(store_read('items')) >= MAX_ITEMS) {
+        fail(409, $full);
+    }
 
-    if ($id !== '') {
-        $item = store_update('items', function (array &$items) use ($id, $type, $place) {
-            foreach ($items as &$item) {
-                if ($item['id'] === $id) {
-                    $item['type'] = $type;
-                    $item['place'] = $place;
-                    return $item;
-                }
+    // Check every upload before writing any, so a bad one leaves nothing behind.
+    $hasPlacePhoto = was_uploaded('placePhoto');
+    if ($isNew) {
+        check_photo('photo');
+    }
+    if ($hasPlacePhoto) {
+        check_photo('placePhoto');
+    }
+    $photo = $isNew ? store_photo('photo') : null;
+    $placePhoto = $hasPlacePhoto ? store_photo('placePhoto') : null;
+    if (($isNew && !$photo) || ($hasPlacePhoto && !$placePhoto)) {
+        drop_photos($photo, $placePhoto);
+        fail(500, 'El servidor no ha podido guardar la foto.');
+    }
+
+    if ($isNew) {
+        $item = ['id' => bin2hex(random_bytes(8))] + $fields
+            + ['photo' => $photo, 'placePhoto' => $placePhoto ?? '', 'created' => time()];
+        $added = store_update('items', function (array &$items) use ($item) {
+            if (count($items) >= MAX_ITEMS) {
+                return false;
             }
-            return null;
+            $items[] = $item;
+            return true;
         });
-        if (!$item) {
-            fail(404, 'Esa prenda ya no existe.');
+        if (!$added) {
+            drop_photos($photo, $placePhoto);
+            fail(409, $full);
         }
         return $item;
     }
 
-    if (count(store_read('items')) >= MAX_ITEMS) {
-        fail(409, 'El armario está lleno. Borra alguna prenda para añadir otra.');
-    }
-    $photo = store_photo($_FILES['photo'] ?? []);
-    $item = [
-        'id' => bin2hex(random_bytes(8)),
-        'type' => $type,
-        'place' => $place,
-        'photo' => $photo,
-        'created' => time(),
-    ];
-    $added = store_update('items', function (array &$items) use ($item) {
-        if (count($items) >= MAX_ITEMS) {
-            return false;
+    $replacePlacePhoto = $hasPlacePhoto || ($_POST['removePlacePhoto'] ?? '') === '1';
+    $oldPlacePhoto = null;
+    $item = store_update('items', function (array &$items) use ($id, $fields, $replacePlacePhoto, $placePhoto, &$oldPlacePhoto) {
+        foreach ($items as &$item) {
+            if ($item['id'] === $id) {
+                $item = array_merge($item, $fields);
+                if ($replacePlacePhoto) {
+                    $oldPlacePhoto = $item['placePhoto'] ?? '';
+                    $item['placePhoto'] = $placePhoto ?? '';
+                }
+                return $item;
+            }
         }
-        $items[] = $item;
-        return true;
+        return null;
     });
-    if (!$added) {
-        @unlink(photo_path($photo));
-        fail(409, 'El armario está lleno. Borra alguna prenda para añadir otra.');
+    if (!$item) {
+        drop_photos($placePhoto);
+        fail(404, 'Esa prenda ya no existe.');
     }
+    drop_photos($oldPlacePhoto);
     return $item;
 }
 
 function delete_item(string $id): void
 {
-    $photo = store_update('items', function (array &$items) use ($id) {
+    $photos = store_update('items', function (array &$items) use ($id) {
         foreach ($items as $index => $item) {
             if ($item['id'] === $id) {
                 array_splice($items, $index, 1);
-                return $item['photo'];
+                return [$item['photo'], $item['placePhoto'] ?? ''];
             }
         }
-        return null;
+        return [];
     });
-    if ($photo) {
-        @unlink(photo_path($photo));
-    }
+    drop_photos(...$photos);
 }
 
 function send_photo(string $name): void
